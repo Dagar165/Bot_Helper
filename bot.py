@@ -56,37 +56,33 @@ def handle_reset(message):
     reset_user(user_id)
     bot.reply_to(message, "История очищена. Начинаем с чистого листа!", parse_mode="Markdown")
 
-# Обработка ГОЛОСОВЫХ сообщений (Версия 2.0 - Прямая передача)
+# Обработка ГОЛОСОВЫХ сообщений (Версия 3.0)
 @bot.message_handler(content_types=['voice'])
 def handle_voice(message):
     user_id = message.from_user.id
-    if user_id not in user_chats:
-        reset_user(user_id)
-
+    chat = get_chat(user_id)
+    
     try:
-        # 1. Получаем файл из Telegram
         file_info = bot.get_file(message.voice.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # 2. Формируем "пакет" данных для Gemini
-        # Мы отправляем байты напрямую, указывая, что это аудио
-        audio_part = {
-            "mime_type": "audio/ogg", 
-            "data": downloaded_file
-        }
+        # КЛЮЧЕВОЙ МОМЕНТ: 
+        # Мы отправляем аудио отдельным запросом (generate_content), а не через chat.send_message.
+        # Так звук НЕ сохраняется в историю и не раздувает её.
+        audio_payload = {"mime_type": "audio/ogg", "data": downloaded_file}
         
-        # 3. Отправляем в чат
-        chat = user_chats[user_id]
-        prompt = "Прослушай это сообщение от участника марафона по 3D и ответь согласно инструкции куратора."
+        # Просим нейронку просто понять, что в аудио, и сразу ответить в контексте марафона
+        response = model.generate_content([audio_payload, "Это вопрос от ученика по 3D марафону. Ответь по инструкции куратора."])
         
-        # В 2026 году 2.5-flash-lite отлично хавает такой формат без загрузки в File API
-        response = chat.send_message([audio_part, prompt])
+        # А теперь ручками добавляем в историю только ТЕКСТ (без тяжелого аудио)
+        chat.history.append({"role": "user", "parts": [f"(Голосом): {message.text or 'Вопрос по уроку'}"]})
+        chat.history.append({"role": "model", "parts": [response.text]})
         
         bot.reply_to(message, response.text, parse_mode="Markdown")
 
     except Exception as e:
         traceback.print_exc()
-        bot.reply_to(message, "Ошибка связи с 'ушами' нейронки. Попробуй еще раз или напиши текстом.", parse_mode="Markdown")
+        bot.reply_to(message, "Ошибка связи с 'ушами' нейронки. Попробуй еще раз.")
 
 # Обработка ТЕКСТОВЫХ сообщений
 @bot.message_handler(func=lambda message: True)
