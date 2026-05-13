@@ -175,7 +175,7 @@ SYSTEM_INSTRUCTION = """
 # Инициализация Gemini
 genai.configure(api_key=GEMINI_KEY)
 gemini_model = genai.GenerativeModel(
-    model_name="models/gemini-1.5-flash",
+    model_name="models/gemini-2.5-flash-lite",
     system_instruction=SYSTEM_INSTRUCTION,
 )
 
