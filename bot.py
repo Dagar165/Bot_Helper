@@ -216,24 +216,17 @@ def handle_message(message):
     if user_id not in user_chats:
         reset_user(user_id)
 
-    count = user_message_counts.get(user_id, 0)
-
-    if count >= MESSAGE_LIMIT:
-        reset_user(user_id)
-        bot.reply_to(
-            message,
-            "🔄 *Память перезагружена.*\n"
-            "Мы достигли лимита в 50 сообщений. Я очистил контекст, но твой текущий вопрос уже обрабатываю в новой сессии!",
-            parse_mode="Markdown"
-        )
-        count = 0 
-
     chat = user_chats[user_id]
+    count = user_message_counts.get(user_id, 0)
 
     try:
         if not message.text:
             bot.reply_to(message, "Принимаю только текст. Скинь текстом!")
             return
+
+        # Ограничиваем историю, чтобы не вылетать по лимитам в Амстердаме
+        if len(chat.history) > 10:
+            chat.history = chat.history[-10:]
 
         response = chat.send_message(message.text)
         user_message_counts[user_id] = count + 1
@@ -241,7 +234,9 @@ def handle_message(message):
 
     except Exception as e:
         traceback.print_exc()
-        bot.reply_to(message, "Ошибка на линии! Маякните Сергею Владимировичу.", parse_mode="Markdown")
+        # Автоматический сброс при ошибке лимитов
+        reset_user(user_id)
+        bot.reply_to(message, "Система перегружена! Я очистил историю, чтобы вернуться в строй. Повтори вопрос еще раз.", parse_mode="Markdown")
 
 if __name__ == "__main__":
     print("Бот запущен на чистом сервере и ждёт вопросов...")
