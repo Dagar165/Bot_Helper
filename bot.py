@@ -7,17 +7,17 @@ import google.generativeai as genai
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_KEY")
 
-# ОБЛЕГЧЕННАЯ ИНСТРУКЦИЯ (меньше токенов = меньше ошибок)
+# Сверхлегкая инструкция (чтобы не пробивать лимиты в Амстердаме)
 SYSTEM_INSTRUCTION = """
-Ты — куратор 3D-марафона «Молот Тора» в Blender. Твой стиль: Журналист-вожатый (без воды, коротко, без приветствий).
-ОТВЕЧАЙ ТОЛЬКО ПРО: Блокинг, Bevel, Apply Scale (Ctrl A), Extrude, Auto Smooth, Материалы, Рендер Eevee.
-ПРАВИЛО: Максимум 3 предложения. В конце — одна микрозадача: «Попробуй прямо сейчас: ...»
-Если вопрос не про 3D или марафон — мягко возвращай к молоту.
+Ты — куратор 3D-марафона «Молот Тора». Стиль: Журналист-вожатый (коротко, без воды, без приветствий).
+Темы: Блокинг, Bevel, Apply Scale, Extrude, Auto Smooth, Материалы, Рендер.
+Правило: Ответ до 3 предложений. В конце одна микрозадача: «Попробуй прямо сейчас: ...»
 """
 
 genai.configure(api_key=GEMINI_KEY)
+# Возвращаем проверенную 2.5-flash-lite
 gemini_model = genai.GenerativeModel(
-    model_name="models/gemini-1.5-flash", # Эта модель сейчас самая стабильная
+    model_name="models/gemini-2.5-flash-lite",
     system_instruction=SYSTEM_INSTRUCTION,
 )
 
@@ -32,7 +32,7 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 def handle_reset(message):
     user_id = message.from_user.id
     reset_user(user_id)
-    bot.reply_to(message, "🔨 **Кузница готова!** Я максимально облегчил свои мозги, чтобы связь не рвалась. Спрашивай по молоту!")
+    bot.reply_to(message, "🔨 **Кузница в строю!** Память очистил. Давай по делу.")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -41,7 +41,7 @@ def handle_message(message):
     chat = user_chats[user_id]
 
     try:
-        # Оставляем в памяти только последние 4 сообщения (самый минимум для стабильности)
+        # Держим в истории только 4 сообщения (самый минимум)
         if len(chat.history) > 4:
             chat.history = chat.history[-4:]
 
@@ -51,7 +51,7 @@ def handle_message(message):
     except Exception as e:
         traceback.print_exc()
         reset_user(user_id)
-        bot.reply_to(message, "Ошибка связи! Гугл в Амстердаме капризничает. Попробуй еще раз через минуту или напиши короче.")
+        bot.reply_to(message, "⚠️ Ошибка лимитов Google. Подожди минуту и напиши снова.")
 
 if __name__ == "__main__":
-    bot.infinity_polling(timeout=20, long_polling_timeout=15)
+    bot.infinity_polling(timeout=15, long_polling_timeout=10)
