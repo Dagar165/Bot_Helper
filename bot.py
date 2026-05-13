@@ -56,7 +56,7 @@ def handle_reset(message):
     reset_user(user_id)
     bot.reply_to(message, "История очищена. Начинаем с чистого листа!", parse_mode="Markdown")
 
-# Обработка ГОЛОСОВЫХ сообщений
+# Обработка ГОЛОСОВЫХ сообщений (Версия 2.0 - Прямая передача)
 @bot.message_handler(content_types=['voice'])
 def handle_voice(message):
     user_id = message.from_user.id
@@ -64,38 +64,29 @@ def handle_voice(message):
         reset_user(user_id)
 
     try:
-        # 1. Скачиваем аудио
+        # 1. Получаем файл из Telegram
         file_info = bot.get_file(message.voice.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        file_path = f"voice_{user_id}.ogg"
-        with open(file_path, 'wb') as f:
-            f.write(downloaded_file)
-
-        # 2. Загружаем и ЖДЕМ обработки
-        audio_file = genai.upload_file(path=file_path)
+        # 2. Формируем "пакет" данных для Gemini
+        # Мы отправляем байты напрямую, указывая, что это аудио
+        audio_part = {
+            "mime_type": "audio/ogg", 
+            "data": downloaded_file
+        }
         
-        # Цикл ожидания готовности файла
-        while audio_file.state.name == "PROCESSING":
-            time.sleep(1)
-            audio_file = genai.get_file(audio_file.name)
-            
-        if audio_file.state.name == "FAILED":
-            raise Exception("Файл не обработался")
-
-        # 3. Отправляем в Gemini
+        # 3. Отправляем в чат
         chat = user_chats[user_id]
-        response = chat.send_message([audio_file, "Слушай внимательно это голосовое. Это вопрос по марафону 3D. Ответь коротко по инструкции."])
+        prompt = "Прослушай это сообщение от участника марафона по 3D и ответь согласно инструкции куратора."
+        
+        # В 2026 году 2.5-flash-lite отлично хавает такой формат без загрузки в File API
+        response = chat.send_message([audio_part, prompt])
         
         bot.reply_to(message, response.text, parse_mode="Markdown")
-        
-        # 4. Чистим за собой
-        os.remove(file_path)
-        genai.delete_file(audio_file.name) # Удаляем файл и из облака Google
 
     except Exception as e:
         traceback.print_exc()
-        bot.reply_to(message, "Что-то в микрофоне зашуршало... Не разобрал. Повтори или напиши текстом?")
+        bot.reply_to(message, "Ошибка связи с 'ушами' нейронки. Попробуй еще раз или напиши текстом.", parse_mode="Markdown")
 
 # Обработка ТЕКСТОВЫХ сообщений
 @bot.message_handler(func=lambda message: True)
