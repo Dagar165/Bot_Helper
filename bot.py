@@ -1,4 +1,5 @@
 import os
+import time
 import traceback
 import telebot
 import google.generativeai as genai
@@ -71,16 +72,26 @@ def handle_voice(message):
         with open(file_path, 'wb') as f:
             f.write(downloaded_file)
 
-        # 2. Отправляем в Gemini
+        # 2. Загружаем и ЖДЕМ обработки
         audio_file = genai.upload_file(path=file_path)
+        
+        # Цикл ожидания готовности файла
+        while audio_file.state.name == "PROCESSING":
+            time.sleep(1)
+            audio_file = genai.get_file(audio_file.name)
+            
+        if audio_file.state.name == "FAILED":
+            raise Exception("Файл не обработался")
+
+        # 3. Отправляем в Gemini
         chat = user_chats[user_id]
         response = chat.send_message([audio_file, "Слушай внимательно это голосовое. Это вопрос по марафону 3D. Ответь коротко по инструкции."])
         
-        # 3. Отвечаем пользователю
         bot.reply_to(message, response.text, parse_mode="Markdown")
         
         # 4. Чистим за собой
         os.remove(file_path)
+        genai.delete_file(audio_file.name) # Удаляем файл и из облака Google
 
     except Exception as e:
         traceback.print_exc()
