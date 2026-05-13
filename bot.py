@@ -1,116 +1,80 @@
 import os
-import time
 import traceback
 import telebot
 import google.generativeai as genai
 
-# Получаем ключи из среды
+# Твои ключи
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_KEY")
 
 SYSTEM_INSTRUCTION = """
-Ты — куратор 3D-марафона «Молот Тора» для детей и подростков. Марафон проходит в Blender (движок Eevee), упор на препродакшн и мудборды.
-
-## ТВОЙ СТИЛЬ
-- Журналист-вожатый: общайся на равных, без иерархии и бюрократии.
-- Короткие ответы — максимум 3 предложения по существу. Без воды.
-- Никогда не начинай ответ с «Отличный вопрос!», «Понимаю», «Конечно!», «Привет!» и других пустых вводных фраз. Сразу — суть.
-- Не уговаривай и не убеждай. Если человек не хочет делать фаски — скажи зачем они нужны в одном предложении и дай задачу. Не разворачивай лекцию.
-- Форматируй ответ для Telegram Markdown: горячие клавиши — в `backticks`, важные слова — **жирным**. Не используй заголовки (#) и длинные списки.
-- В конце каждого ответа — одна конкретная микрозадача: «Попробуй прямо сейчас: ...»
-- Если спрашивают не про 3D, не про Blender и не про марафон — мягко возвращай в контекст: «Это не по теме марафона — давай вернёмся к молоту!»
+Ты — куратор 3D-марафона «Молот Тора». Марафон в Blender (Eevee).
+Твой стиль: Журналист-вожатый. Без иерархии, коротко (3 предложения), без воды.
+В конце — всегда одна микрозадача: «Попробуй прямо сейчас: ...»
 """
 
-# Инициализация Gemini
 genai.configure(api_key=GEMINI_KEY)
-gemini_model = genai.GenerativeModel(
+# Используем 2.5 Flash-Lite, раз она у тебя работала
+model = genai.GenerativeModel(
     model_name="models/gemini-2.5-flash-lite",
-    system_instruction=SYSTEM_INSTRUCTION,
+    system_instruction=SYSTEM_INSTRUCTION
 )
 
 user_chats = {}
-user_message_counts = {}
-MESSAGE_LIMIT = 50
 
-# Инициализация Telegram Бота
+def get_chat(user_id):
+    if user_id not in user_chats:
+        user_chats[user_id] = model.start_chat(history=[])
+    return user_chats[user_id]
+
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-def reset_user(user_id):
-    user_chats[user_id] = gemini_model.start_chat(history=[])
-    user_message_counts[user_id] = 0
-
-@bot.message_handler(commands=["start"])
+@bot.message_handler(commands=["start", "reset"])
 def handle_start(message):
     user_id = message.from_user.id
-    reset_user(user_id)
-    name = message.from_user.first_name or "друг"
-    bot.reply_to(
-        message,
-        f"Привет, {name}! Я куратор марафона «Молот Тора» в Blender. Я теперь еще и голосовые понимаю, так что спрашивай как удобно! 🔨",
-        parse_mode="Markdown"
-    )
+    if user_id in user_chats: del user_chats[user_id]
+    bot.reply_to(message, "🔨 Память очищена. Давай заново по молоту!")
 
-@bot.message_handler(commands=["reset"])
-def handle_reset(message):
-    user_id = message.from_user.id
-    reset_user(user_id)
-    bot.reply_to(message, "История очищена. Начинаем с чистого листа!", parse_mode="Markdown")
-
-# Обработка ГОЛОСОВЫХ сообщений (Версия 3.0)
+# ГОЛОС: Слушаем отдельно, в историю чата НЕ КЛАДЕМ
 @bot.message_handler(content_types=['voice'])
 def handle_voice(message):
     user_id = message.from_user.id
     chat = get_chat(user_id)
-    
     try:
         file_info = bot.get_file(message.voice.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # КЛЮЧЕВОЙ МОМЕНТ: 
-        # Мы отправляем аудио отдельным запросом (generate_content), а не через chat.send_message.
-        # Так звук НЕ сохраняется в историю и не раздувает её.
+        # Прямая передача байтов (без сохранения в историю)
         audio_payload = {"mime_type": "audio/ogg", "data": downloaded_file}
         
-        # Просим нейронку просто понять, что в аудио, и сразу ответить в контексте марафона
-        response = model.generate_content([audio_payload, "Это вопрос от ученика по 3D марафону. Ответь по инструкции куратора."])
+        # Просим модель просто понять суть и ответить
+        response = model.generate_content([audio_payload, "Слушай аудио. Это вопрос по 3D марафону. Ответь по инструкции."])
         
-        # А теперь ручками добавляем в историю только ТЕКСТ (без тяжелого аудио)
-        chat.history.append({"role": "user", "parts": [f"(Голосом): {message.text or 'Вопрос по уроку'}"]})
+        # Добавляем в историю только ТЕКСТОВУЮ пометку, чтобы не раздувать память
+        chat.history.append({"role": "user", "parts": ["(Был задан вопрос голосовым сообщением)"]})
         chat.history.append({"role": "model", "parts": [response.text]})
         
         bot.reply_to(message, response.text, parse_mode="Markdown")
-
     except Exception as e:
-        traceback.print_exc()
-        bot.reply_to(message, "Ошибка связи с 'ушами' нейронки. Попробуй еще раз.")
+        # Если ошибка "429/Limit 0", пишем честно
+        if "429" in str(e) or "limit" in str(e).lower():
+            bot.reply_to(message, "Гугл временно заблокировал лимиты из-за Амстердама. Подожди 5 минут.")
+        else:
+            bot.reply_to(message, "Не расслышал. Давай текстом?")
 
-# Обработка ТЕКСТОВЫХ сообщений
+# ТЕКСТ
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     user_id = message.from_user.id
-
-    if user_id not in user_chats:
-        reset_user(user_id)
-
-    count = user_message_counts.get(user_id, 0)
-    if count >= MESSAGE_LIMIT:
-        reset_user(user_id)
-        count = 0 
-
-    chat = user_chats[user_id]
-
+    chat = get_chat(user_id)
     try:
-        if not message.text:
-            return
-
+        if not message.text: return
         response = chat.send_message(message.text)
-        user_message_counts[user_id] = count + 1
         bot.reply_to(message, response.text, parse_mode="Markdown")
-
     except Exception as e:
         traceback.print_exc()
-        bot.reply_to(message, "Ошибка на линии! Маякните Сергею Владимировичу.")
+        if user_id in user_chats: del user_chats[user_id]
+        bot.reply_to(message, "Ошибка на линии! Маякни Сергею Владимировичу или попробуй через 5 минут.")
 
 if __name__ == "__main__":
-    print("Бот запущен и готов слушать голоса...")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    bot.infinity_polling(timeout=20, long_polling_timeout=15)
