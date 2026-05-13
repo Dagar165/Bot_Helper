@@ -242,6 +242,38 @@ def handle_message(message):
     except Exception as e:
         traceback.print_exc()
         bot.reply_to(message, "Ошибка на линии! Маякните Сергею Владимировичу.", parse_mode="Markdown")
+@bot.message_handler(content_types=['voice'])
+def handle_voice(message):
+    user_id = message.from_user.id
+    if user_id not in user_chats:
+        reset_user(user_id)
+
+    try:
+        # 1. Получаем инфо о файле и скачиваем его
+        file_info = bot.get_file(message.voice.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        # 2. Сохраняем временный файл
+        file_name = f"voice_{user_id}.ogg"
+        with open(file_name, 'wb') as f:
+            f.write(downloaded_file)
+
+        # 3. Загружаем файл в систему Google AI
+        # Gemini 2.5 нативно понимает формат .ogg, конвертация не нужна
+        audio_file = genai.upload_file(path=file_name)
+        
+        # 4. Отправляем аудио модели вместе с инструкцией
+        chat = user_chats[user_id]
+        response = chat.send_message([audio_file, "Это голосовое сообщение от ученика. Ответь по теме марафона «Молот Тора»."])
+        
+        bot.reply_to(message, response.text, parse_mode="Markdown")
+        
+        # 5. Удаляем временный файл, чтобы не засорять сервер
+        os.remove(file_name)
+
+    except Exception as e:
+        traceback.print_exc()
+        bot.reply_to(message, "Не расслышал! Можешь повторить или написать текстом?", parse_mode="Markdown")
 
 if __name__ == "__main__":
     print("Бот запущен на чистом сервере и ждёт вопросов...")
